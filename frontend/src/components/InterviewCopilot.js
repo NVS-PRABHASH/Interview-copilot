@@ -19,7 +19,7 @@ const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
   const audioChunksRef = useRef([]);
   const streamRef = useRef(null);
   const silenceTimeoutRef = useRef(null);
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'https://f581555b-dca5-41e2-b7a5-b4ee9f25f8c2.preview.emergentagent.com';
 
   // Create authorization header with API keys
   const getAuthHeader = () => {

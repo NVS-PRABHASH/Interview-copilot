@@ -13,7 +13,7 @@ const SetupModal = ({ onComplete, onClose, existingKeys }) => {
   const [validationError, setValidationError] = useState('');
   const [validationSuccess, setValidationSuccess] = useState(false);
 
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'http://localhost:8000';
+  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'https://f581555b-dca5-41e2-b7a5-b4ee9f25f8c2.preview.emergentagent.com';
 
   const validateKeys = async () => {
     if (!googleApiKey.trim() || !geminiApiKey.trim()) {
