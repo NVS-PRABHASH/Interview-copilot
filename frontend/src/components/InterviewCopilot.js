@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Mic, MicOff, Eye, EyeOff, Settings, Volume2, VolumeX, RotateCcw } from 'lucide-react';
 import axios from 'axios';
+import API_CONFIG from '../config/api';
 
 const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
   const [isListening, setIsListening] = useState(false);
@@ -19,7 +20,9 @@ const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
   const audioChunksRef = useRef([]);
   const streamRef = useRef(null);
   const silenceTimeoutRef = useRef(null);
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'https://f581555b-dca5-41e2-b7a5-b4ee9f25f8c2.preview.emergentagent.com';
+  
+  // Create axios instance with configuration
+  const apiClient = axios.create(API_CONFIG);
 
   // Create authorization header with API keys
   const getAuthHeader = () => {
@@ -70,6 +73,7 @@ const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
   const createSession = async () => {
     try {
       const response = await axios.post(`${backendUrl}/api/interview/session`, {}, {
+      const response = await apiClient.post('/api/interview/session', {}, {
         headers: getAuthHeader()
       });
       const session = response.data;
@@ -105,6 +109,7 @@ const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
       const base64Audio = await audioToBase64(audioBlob);
       
       const response = await axios.post(`${backendUrl}/api/transcribe-audio`, {
+      const response = await apiClient.post('/api/transcribe-audio', {
         session_id: currentSession.id,
         audio_data: base64Audio,
         audio_format: 'webm',
@@ -145,7 +150,7 @@ const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
     if (!currentSession || !text.trim()) return;
     
     try {
-      await axios.post(`${backendUrl}/api/interview/transcript`, {
+      await apiClient.post('/api/interview/transcript', {
         session_id: currentSession.id,
         text: text.trim(),
         speaker: 'interviewer',
@@ -172,7 +177,7 @@ const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
     setDebugInfo('🤖 Generating AI response...');
     
     try {
-      const response = await axios.post(`${backendUrl}/api/interview/ai-response`, {
+      const response = await apiClient.post('/api/interview/ai-response', {
         session_id: currentSession.id,
         question: question.trim()
       }, {

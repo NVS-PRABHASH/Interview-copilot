@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Key, Eye, EyeOff, CheckCircle, AlertCircle, Loader, X, ExternalLink } from 'lucide-react';
 import axios from 'axios';
+import API_CONFIG from '../config/api';
 
 const SetupModal = ({ onComplete, onClose, existingKeys }) => {
   const [step, setStep] = useState(1);
@@ -13,7 +14,8 @@ const SetupModal = ({ onComplete, onClose, existingKeys }) => {
   const [validationError, setValidationError] = useState('');
   const [validationSuccess, setValidationSuccess] = useState(false);
 
-  const backendUrl = process.env.REACT_APP_BACKEND_URL || 'https://f581555b-dca5-41e2-b7a5-b4ee9f25f8c2.preview.emergentagent.com';
+  // Create axios instance with configuration
+  const apiClient = axios.create(API_CONFIG);
 
   const validateKeys = async () => {
     if (!googleApiKey.trim() || !geminiApiKey.trim()) {
@@ -25,7 +27,7 @@ const SetupModal = ({ onComplete, onClose, existingKeys }) => {
     setValidationError('');
 
     try {
-      const response = await axios.post(`${backendUrl}/api/validate-keys`, {
+      const response = await apiClient.post('/api/validate-keys', {
         google_speech_api_key: googleApiKey.trim(),
         gemini_api_key: geminiApiKey.trim()
       });

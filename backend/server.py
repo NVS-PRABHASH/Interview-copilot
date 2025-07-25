@@ -1,7 +1,11 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from fastapi import Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -18,23 +22,45 @@ import aiohttp
 from google.cloud import speech
 from google.oauth2 import service_account
 import io
+from functools import wraps
+import hashlib
+import hmac
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
+
+# Rate limiting setup
+limiter = Limiter(key_func=get_remote_address)
 
 # MongoDB connection
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'interview_copilot')]
 
+# Security configuration
+JWT_SECRET = os.environ.get('JWT_SECRET_KEY', 'your-super-secret-jwt-key-here')
+CORS_ORIGINS = os.environ.get('CORS_ORIGINS', 'http://localhost:3000').split(',')
+
 # Create the main app without a prefix
 app = FastAPI(title="Interview Copilot API", version="1.0.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Create a router with the /api prefix
 api_router = APIRouter(prefix="/api")
 
 # Security
 security = HTTPBearer(auto_error=False)
+
+# Input validation decorator
+def validate_session_id(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        session_id = kwargs.get('session_id') or (args[0].session_id if args and hasattr(args[0], 'session_id') else None)
+        if not session_id or len(session_id) < 10:
+            raise HTTPException(status_code=400, detail="Invalid session ID")
+        return await func(*args, **kwargs)
+    return wrapper
 
 # Models
 class APIKeysModel(BaseModel):
@@ -111,8 +137,16 @@ async def get_api_keys(credentials: HTTPAuthorizationCredentials = Depends(secur
 
 # API Key validation endpoint
 @api_router.post("/validate-keys")
-async def validate_api_keys(keys: APIKeysModel):
+@limiter.limit("10/minute")
+async def validate_api_keys(request: Request, keys: APIKeysModel):
     """Validate provided API keys"""
+    # Input validation
+    if not keys.google_speech_api_key or len(keys.google_speech_api_key) < 20:
+        raise HTTPException(status_code=400, detail="Invalid Google Speech API key format")
+    
+    if not keys.gemini_api_key or len(keys.gemini_api_key) < 20:
+        raise HTTPException(status_code=400, detail="Invalid Gemini API key format")
+    
     try:
         # Test Gemini API key
         try:
@@ -140,8 +174,16 @@ async def validate_api_keys(keys: APIKeysModel):
 
 # Audio transcription endpoint
 @api_router.post("/transcribe-audio", response_model=AudioTranscriptionResponse)
-async def transcribe_audio(request: AudioTranscriptionRequest, api_keys: APIKeysModel = Depends(get_api_keys)):
+@limiter.limit("30/minute")
+async def transcribe_audio(http_request: Request, request: AudioTranscriptionRequest, api_keys: APIKeysModel = Depends(get_api_keys)):
     """Transcribe audio using Google Speech-to-Text API"""
+    # Input validation
+    if not request.session_id or len(request.session_id) < 10:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+    
+    if not request.audio_data or len(request.audio_data) < 100:
+        raise HTTPException(status_code=400, detail="Invalid audio data")
+    
     try:
         # Verify session exists
         session = await db.interview_sessions.find_one({"id": request.session_id})
@@ -215,26 +257,48 @@ async def transcribe_audio(request: AudioTranscriptionRequest, api_keys: APIKeys
 
 # Interview Session Management
 @api_router.post("/interview/session", response_model=InterviewSession)
-async def create_interview_session(input: InterviewSessionCreate):
+@limiter.limit("10/minute")
+async def create_interview_session(request: Request, input: InterviewSessionCreate):
     session_obj = InterviewSession(**input.dict())
     await db.interview_sessions.insert_one(session_obj.dict())
+    
+    # Create indexes for better performance
+    await db.interview_sessions.create_index("id")
+    await db.interview_sessions.create_index("created_at")
+    
     return session_obj
 
 @api_router.get("/interview/session/{session_id}", response_model=InterviewSession)
-async def get_interview_session(session_id: str):
+@limiter.limit("60/minute")
+async def get_interview_session(request: Request, session_id: str):
+    if not session_id or len(session_id) < 10:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+        
     session = await db.interview_sessions.find_one({"id": session_id})
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
     return InterviewSession(**session)
 
 @api_router.get("/interview/sessions", response_model=List[InterviewSession])
-async def get_all_sessions():
+@limiter.limit("20/minute")
+async def get_all_sessions(request: Request):
     sessions = await db.interview_sessions.find().to_list(100)
     return [InterviewSession(**session) for session in sessions]
 
 # Transcript Management
 @api_router.post("/interview/transcript", response_model=TranscriptEntry)
-async def add_transcript(input: TranscriptCreate):
+@limiter.limit("100/minute")
+async def add_transcript(request: Request, input: TranscriptCreate):
+    # Input validation
+    if not input.session_id or len(input.session_id) < 10:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+    
+    if not input.text or len(input.text.strip()) < 1:
+        raise HTTPException(status_code=400, detail="Transcript text is required")
+    
+    if len(input.text) > 10000:
+        raise HTTPException(status_code=400, detail="Transcript text too long")
+    
     # Verify session exists
     session = await db.interview_sessions.find_one({"id": input.session_id})
     if not session:
@@ -242,16 +306,35 @@ async def add_transcript(input: TranscriptCreate):
     
     transcript_obj = TranscriptEntry(**input.dict())
     await db.transcripts.insert_one(transcript_obj.dict())
+    
+    # Create indexes for better performance
+    await db.transcripts.create_index([("session_id", 1), ("timestamp", 1)])
+    
     return transcript_obj
 
 @api_router.get("/interview/transcript/{session_id}", response_model=List[TranscriptEntry])
-async def get_session_transcripts(session_id: str):
+@limiter.limit("60/minute")
+async def get_session_transcripts(request: Request, session_id: str):
+    if not session_id or len(session_id) < 10:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+        
     transcripts = await db.transcripts.find({"session_id": session_id}).sort("timestamp", 1).to_list(1000)
     return [TranscriptEntry(**transcript) for transcript in transcripts]
 
 # AI Response Generation
 @api_router.post("/interview/ai-response", response_model=AIResponse)
-async def generate_ai_response(input: AIResponseRequest, api_keys: APIKeysModel = Depends(get_api_keys)):
+@limiter.limit("20/minute")
+async def generate_ai_response(http_request: Request, input: AIResponseRequest, api_keys: APIKeysModel = Depends(get_api_keys)):
+    # Input validation
+    if not input.session_id or len(input.session_id) < 10:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+    
+    if not input.question or len(input.question.strip()) < 5:
+        raise HTTPException(status_code=400, detail="Question must be at least 5 characters")
+    
+    if len(input.question) > 5000:
+        raise HTTPException(status_code=400, detail="Question too long")
+    
     try:
         # Verify session exists
         session = await db.interview_sessions.find_one({"id": input.session_id})
@@ -306,6 +389,9 @@ Structure your response as:
         )
         await db.ai_responses.insert_one(response_obj.dict())
         
+        # Create indexes for better performance
+        await db.ai_responses.create_index([("session_id", 1), ("timestamp", 1)])
+        
         return response_obj
         
     except Exception as e:
@@ -313,24 +399,31 @@ Structure your response as:
         raise HTTPException(status_code=500, detail=f"Failed to generate AI response: {str(e)}")
 
 @api_router.get("/interview/ai-responses/{session_id}", response_model=List[AIResponse])
-async def get_session_ai_responses(session_id: str):
+@limiter.limit("60/minute")
+async def get_session_ai_responses(request: Request, session_id: str):
+    if not session_id or len(session_id) < 10:
+        raise HTTPException(status_code=400, detail="Invalid session ID")
+        
     responses = await db.ai_responses.find({"session_id": session_id}).sort("timestamp", 1).to_list(1000)
     return [AIResponse(**response) for response in responses]
 
 # Original status endpoints
 @api_router.get("/")
-async def root():
+@limiter.limit("100/minute")
+async def root(request: Request):
     return {"message": "Interview Copilot API", "version": "1.0.0", "status": "running"}
 
 @api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
+@limiter.limit("30/minute")
+async def create_status_check(request: Request, input: StatusCheckCreate):
     status_dict = input.dict()
     status_obj = StatusCheck(**status_dict)
     _ = await db.status_checks.insert_one(status_obj.dict())
     return status_obj
 
 @api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
+@limiter.limit("60/minute")
+async def get_status_checks(request: Request):
     status_checks = await db.status_checks.find().to_list(1000)
     return [StatusCheck(**status_check) for status_check in status_checks]
 
@@ -340,7 +433,7 @@ app.include_router(api_router)
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )

@@ -16,7 +16,10 @@
   "keywords": ["interview", "copilot", "speech-to-text", "ai", "gemini"],
   "author": "Interview Copilot Team",
   "license": "MIT",
-  "devDependencies": {
+  "dependencies": {
     "concurrently": "^8.2.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
   }
 }

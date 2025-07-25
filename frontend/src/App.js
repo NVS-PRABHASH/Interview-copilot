@@ -4,6 +4,8 @@ import { Mic, MicOff, Eye, EyeOff, Settings, Key, CheckCircle, AlertCircle, Load
 import './App.css';
 import SetupModal from './components/SetupModal';
 import InterviewCopilot from './components/InterviewCopilot';
+import { apiKeyManager } from './utils/apiKeyManager';
+import API_CONFIG from './config/api';
 
 function App() {
   const [isSetupComplete, setIsSetupComplete] = useState(false);
@@ -12,17 +14,11 @@ function App() {
 
   // Check if API keys are stored in sessionStorage
   useEffect(() => {
-    const storedKeys = sessionStorage.getItem('interview_copilot_keys');
+    const storedKeys = apiKeyManager.getKeys();
     if (storedKeys) {
-      try {
-        const keys = JSON.parse(storedKeys);
-        setApiKeys(keys);
-        setIsSetupComplete(true);
-        setShowSetup(false);
-      } catch (error) {
-        console.error('Failed to parse stored API keys:', error);
-        sessionStorage.removeItem('interview_copilot_keys');
-      }
+      setApiKeys(storedKeys);
+      setIsSetupComplete(true);
+      setShowSetup(false);
     }
   }, []);
 
@@ -31,8 +27,8 @@ function App() {
     setIsSetupComplete(true);
     setShowSetup(false);
     
-    // Store keys in sessionStorage for this session
-    sessionStorage.setItem('interview_copilot_keys', JSON.stringify(keys));
+    // Store encrypted keys
+    apiKeyManager.storeKeys(keys);
   };
 
   const handleShowSetup = () => {
@@ -43,7 +39,7 @@ function App() {
     setApiKeys(null);
     setIsSetupComplete(false);
     setShowSetup(true);
-    sessionStorage.removeItem('interview_copilot_keys');
+    apiKeyManager.clearKeys();
   };
 
   return (
