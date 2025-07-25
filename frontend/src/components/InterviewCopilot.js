@@ -73,6 +73,8 @@ const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
   const createSession = async () => {
     try {
       const response = await axios.post(`${backendUrl}/api/interview/session`, {}, {
+      }
+      )
       const response = await apiClient.post('/api/interview/session', {}, {
         headers: getAuthHeader()
       });
@@ -109,6 +111,8 @@ const InterviewCopilot = ({ apiKeys, onShowSetup, onResetSetup }) => {
       const base64Audio = await audioToBase64(audioBlob);
       
       const response = await axios.post(`${backendUrl}/api/transcribe-audio`, {
+      }
+      )
       const response = await apiClient.post('/api/transcribe-audio', {
         session_id: currentSession.id,
         audio_data: base64Audio,
