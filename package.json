@@ -1,0 +1,22 @@
+{
+  "name": "interview-copilot-web",
+  "version": "1.0.0",
+  "description": "Web-based Interview Copilot with Google Speech-to-Text and Gemini AI",
+  "main": "index.js",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && uvicorn server:app --reload --host 0.0.0.0 --port 8000",
+    "dev:frontend": "cd frontend && npm start",
+    "build": "cd frontend && npm run build",
+    "start": "cd backend && uvicorn server:app --host 0.0.0.0 --port 8000",
+    "install:all": "npm install && cd backend && pip install -r requirements.txt && cd ../frontend && npm install",
+    "test": "cd backend && python -m pytest tests/ -v",
+    "test:api": "python backend_test.py"
+  },
+  "keywords": ["interview", "copilot", "speech-to-text", "ai", "gemini"],
+  "author": "Interview Copilot Team",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
